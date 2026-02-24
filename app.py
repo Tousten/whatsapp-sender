@@ -6,6 +6,7 @@ import os
 import time
 import csv
 import io
+import urllib.parse
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'whatsapp-sender-key')
@@ -347,7 +348,7 @@ def generate_links():
         
         # Create WhatsApp click-to-chat link
         # Format: https://wa.me/PHONE?text=MESSAGE
-        encoded_msg = requests.utils.quote(personalized_msg)
+        encoded_msg = urllib.parse.quote(personalized_msg)
         wa_link = f"https://wa.me/{client['phone']}?text={encoded_msg}"
         
         links.append({
@@ -395,7 +396,7 @@ def api_send():
         
         if phone:
             personalized_msg = message.replace('{nome}', name)
-            encoded_msg = requests.utils.quote(personalized_msg)
+            encoded_msg = urllib.parse.quote(personalized_msg)
             wa_link = f"https://wa.me/{phone}?text={encoded_msg}"
             
             links.append({
