@@ -334,8 +334,36 @@ HTML_TEMPLATE = """
                 
                 <div class="form-group">
                     <label>📋 Lista de Clientes (alternativo)</label>
-                    <textarea id="clientList" name="clientList" rows="5" placeholder="João Silva - 5511999999999
-Maria Santos - 5511888888888"></textarea>
+                    <textarea id="clientList" name="clientList" rows="5" placeholder="João Silva - 11999999999
+Maria Santos - 11888888888"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>🌍 Código do País</label>
+                    <select id="countryCode" name="countryCode" style="width: 100%; padding: 15px; border: 2px solid #e0e0e0; border-radius: 12px; font-size: 1rem;">
+                        <option value="55" selected>🇧🇷 Brasil (+55)</option>
+                        <option value="1">🇺🇸 Estados Unidos (+1)</option>
+                        <option value="44">🇬🇧 Reino Unido (+44)</option>
+                        <option value="49">🇩🇪 Alemanha (+49)</option>
+                        <option value="33">🇫🇷 França (+33)</option>
+                        <option value="34">🇪🇸 Espanha (+34)</option>
+                        <option value="39">🇮🇹 Itália (+39)</option>
+                        <option value="351">🇵🇹 Portugal (+351)</option>
+                        <option value="54">🇦🇷 Argentina (+54)</option>
+                        <option value="56">🇨🇱 Chile (+56)</option>
+                        <option value="57">🇨🇴 Colômbia (+57)</option>
+                        <option value="52">🇲🇽 México (+52)</option>
+                        <option value="91">🇮🇳 Índia (+91)</option>
+                        <option value="86">🇨🇳 China (+86)</option>
+                        <option value="81">🇯🇵 Japão (+81)</option>
+                        <option value="82">🇰🇷 Coreia do Sul (+82)</option>
+                        <option value="61">🇦🇺 Austrália (+61)</option>
+                        <option value="64">🇳🇿 Nova Zelândia (+64)</option>
+                        <option value="27">🇿🇦 África do Sul (+27)</option>
+                        <option value="971">🇦🇪 Emirados Árabes (+971)</option>
+                        <option value="">🌐 Outro (digite código completo)</option>
+                    </select>
+                    <small>Selecione o país. Os números serão formatados automaticamente.</small>
                 </div>
                 
                 <div class="form-group">
@@ -657,6 +685,7 @@ def parse_clients(request):
     # Try CSV file
     if 'csvFile' in request.files:
         file = request.files['csvFile']
+        country_code = request.form.get('countryCode', '55')
         if file.filename:
             try:
                 stream = io.StringIO(file.stream.read().decode("UTF-8"), newline=None)
@@ -665,7 +694,7 @@ def parse_clients(request):
                     name = row.get('nome', row.get('name', '')).strip()
                     phone = row.get('telefone', row.get('phone', row.get('numero', ''))).strip()
                     if name and phone:
-                        phone = clean_phone(phone)
+                        phone = clean_phone(phone, country_code)
                         clients.append({'name': name, 'phone': phone})
             except Exception as e:
                 print(f"CSV error: {e}")
@@ -673,6 +702,7 @@ def parse_clients(request):
     # Try text list
     if not clients:
         client_list = request.form.get('clientList', '').strip()
+        country_code = request.form.get('countryCode', '55')
         if client_list:
             for line in client_list.split('\n'):
                 line = line.strip()
@@ -681,35 +711,36 @@ def parse_clients(request):
                 if '-' in line:
                     parts = line.rsplit('-', 1)
                     name = parts[0].strip()
-                    phone = clean_phone(parts[1].strip())
+                    phone = clean_phone(parts[1].strip(), country_code)
                 elif ',' in line:
                     parts = line.split(',', 1)
                     name = parts[0].strip()
-                    phone = clean_phone(parts[1].strip())
+                    phone = clean_phone(parts[1].strip(), country_code)
                 else:
                     name = 'Cliente'
-                    phone = clean_phone(line)
+                    phone = clean_phone(line, country_code)
                 
                 if phone:
                     clients.append({'name': name, 'phone': phone})
     
     return clients
 
-def clean_phone(phone):
+def clean_phone(phone, country_code='55'):
     """Clean and format phone number for WhatsApp - supports international"""
     # Remove all non-digits
     digits = ''.join(c for c in phone if c.isdigit())
     
-    # If starts with +, remove it (we already have digits only)
-    # If starts with 00, replace with country code
+    # If starts with 00, remove it
     if digits.startswith('00'):
         digits = digits[2:]
     
-    # If no country code and looks like Brazilian number (10-11 digits), add 55
-    if len(digits) <= 11 and not digits.startswith('55'):
-        # Check if it looks like a Brazilian mobile (starts with 9 after area code)
-        if len(digits) == 11 or len(digits) == 10:
-            digits = '55' + digits
+    # If already has country code (3+ digits at start), keep it
+    if len(digits) > 10 and digits.startswith(('1', '44', '49', '33', '34', '39', '351', '54', '56', '57', '52', '91', '86', '81', '82', '61', '64', '27', '971', '55')):
+        return digits
+    
+    # Otherwise, add selected country code
+    if not digits.startswith(country_code):
+        digits = country_code + digits
     
     return digits
 
