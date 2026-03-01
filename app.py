@@ -696,14 +696,20 @@ def parse_clients(request):
     return clients
 
 def clean_phone(phone):
-    """Clean and format phone number for WhatsApp"""
+    """Clean and format phone number for WhatsApp - supports international"""
+    # Remove all non-digits
     digits = ''.join(c for c in phone if c.isdigit())
     
-    if digits.startswith('0'):
-        digits = '55' + digits[1:]
+    # If starts with +, remove it (we already have digits only)
+    # If starts with 00, replace with country code
+    if digits.startswith('00'):
+        digits = digits[2:]
     
-    if not digits.startswith('55') and len(digits) <= 11:
-        digits = '55' + digits
+    # If no country code and looks like Brazilian number (10-11 digits), add 55
+    if len(digits) <= 11 and not digits.startswith('55'):
+        # Check if it looks like a Brazilian mobile (starts with 9 after area code)
+        if len(digits) == 11 or len(digits) == 10:
+            digits = '55' + digits
     
     return digits
 
