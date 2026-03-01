@@ -1,8 +1,9 @@
 # WhatsApp Bulk Sender - Auto Shop Oil Change Reminder
 # Simple tool to send messages to multiple clients via WhatsApp Web
 # Optional: Browser automation for auto-sending
+# Now with CRM integration
 
-from flask import Flask, render_template_string, request, jsonify, render_template
+from flask import Flask, render_template_string, request, jsonify, render_template, session
 import os
 import time
 import csv
@@ -10,9 +11,14 @@ import io
 import urllib.parse
 import threading
 import json
+import requests
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'whatsapp-sender-key')
+
+# CRM Configuration
+CRM_API_URL = os.environ.get('CRM_API_URL', '')  # e.g., https://your-crm.onrender.com/api/customers
+CRM_ENABLED = bool(CRM_API_URL)
 
 # Store automation status
 automation_status = {
@@ -569,6 +575,9 @@ def generate_links():
     
     message_template = request.form.get('message', 'Olá {nome}!')
     
+    # Get seller_id from session (if logged in)
+    seller_id = session.get('crm_user_id')
+    
     links = []
     for client in clients:
         personalized_msg = message_template.replace('{nome}', client['name'])
@@ -581,8 +590,16 @@ def generate_links():
             'link': wa_link,
             'message': personalized_msg
         })
+        
+        # Save to CRM (async - don't block response)
+        if CRM_ENABLED:
+            threading.Thread(
+                target=save_to_crm,
+                args=(client['name'], client['phone'], seller_id),
+                daemon=True
+            ).start()
     
-    return jsonify({'success': True, 'links': links, 'count': len(links)})
+    return jsonify({'success': True, 'links': links, 'count': len(links), 'crm_saved': CRM_ENABLED})
 
 @app.route('/automate', methods=['POST'])
 def automate():
@@ -832,6 +849,109 @@ def run_automation(clients, message_template, delay, headless):
         automation_status['running'] = False
         automation_status['message'] = f'Erro: {str(e)}'
         add_log(f'Erro fatal: {str(e)}', 'error')
+
+def save_to_crm(name, phone, seller_id=None):
+    """Save customer to CRM via API"""
+    if not CRM_ENABLED:
+        return
+    
+    try:
+        payload = {
+            "name": name,
+            "phone": phone,
+            "seller_id": seller_id
+        }
+        
+        response = requests.post(CRM_API_URL, json=payload, timeout=5)
+        if response.status_code in [200, 201]:
+            print(f"Saved to CRM: {name}")
+        else:
+            print(f"CRM save failed: {response.status_code}")
+    except Exception as e:
+        print(f"CRM error: {e}")
+
+# CRM Login Routes
+@app.route('/crm/login', methods=['GET', 'POST'])
+def crm_login():
+    """Login to CRM to associate customers with seller"""
+    if request.method == 'POST':
+        username_or_email = request.form.get('username_or_email')
+        password = request.form.get('password')
+        crm_url = request.form.get('crm_url', '').rstrip('/')
+        
+        # Store CRM URL
+        if crm_url:
+            session['crm_url'] = crm_url
+            global CRM_API_URL, CRM_ENABLED
+            CRM_API_URL = f"{crm_url}/api/customers"
+            CRM_ENABLED = True
+        
+        # Simple mode - just store username as seller_id
+        session['crm_user_id'] = username_or_email
+        session['crm_username'] = username_or_email
+        return jsonify({'success': True, 'message': 'Seller ID set', 'seller_id': username_or_email})
+    
+    # Return login form HTML
+    return render_template_string("""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>CRM Login - WhatsApp Sender</title>
+        <style>
+            body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #25d366 0%, #128c7e 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; }
+            .login-box { background: white; padding: 40px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); width: 90%; max-width: 400px; }
+            h1 { color: #333; margin-bottom: 30px; text-align: center; }
+            .form-group { margin-bottom: 20px; }
+            label { display: block; margin-bottom: 8px; color: #666; font-weight: 600; }
+            input { width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1rem; }
+            input:focus { outline: none; border-color: #25d366; }
+            button { width: 100%; padding: 14px; background: linear-gradient(135deg, #25d366 0%, #128c7e 100%); color: white; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; }
+            .info { background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; color: #1565c0; font-size: 0.9rem; }
+            .skip { text-align: center; margin-top: 15px; }
+            .skip a { color: #666; text-decoration: none; }
+        </style>
+    </head>
+    <body>
+        <div class="login-box">
+            <h1>🔧 CRM Login</h1>
+            <div class="info">
+                Enter your seller ID to associate customers with your account. Or skip to save without seller ID.
+            </div>
+            <form method="POST" action="/crm/login">
+                <div class="form-group">
+                    <label>CRM URL (optional)</label>
+                    <input type="url" name="crm_url" placeholder="https://your-crm.onrender.com">
+                </div>
+                <div class="form-group">
+                    <label>Seller ID / Username</label>
+                    <input type="text" name="username_or_email" placeholder="Your seller ID">
+                </div>
+                <button type="submit">Set Seller ID</button>
+            </form>
+            <div class="skip">
+                <a href="/">← Skip and go to WhatsApp Sender</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """)
+
+@app.route('/crm/logout')
+def crm_logout():
+    """Logout from CRM"""
+    session.pop('crm_user_id', None)
+    session.pop('crm_username', None)
+    return jsonify({'success': True, 'message': 'Logged out'})
+
+@app.route('/crm/status')
+def crm_status():
+    """Check CRM connection status"""
+    return jsonify({
+        'connected': CRM_ENABLED,
+        'logged_in': 'crm_user_id' in session,
+        'username': session.get('crm_username'),
+        'crm_url': session.get('crm_url')
+    })
 
 if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
